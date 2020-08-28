@@ -1,0 +1,38 @@
+---
+title: "readme"
+output: html_document
+---
+
+```{r}
+#INSTALLING PACKAGES:
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("limma")
+library("limma")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("edgeR")
+library('edgeR')
+
+
+if (!requireNamespace('BiocManager', quietly = TRUE))
+  install.packages('BiocManager')
+BiocManager::install('EnhancedVolcano')
+library(EnhancedVolcano)
+
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library(pheatmap)
+library(RColorBrewer)
+library(venn)
+library(VennDiagram)
+library(gridExtra)
+library(ggplotify)
+library(png)
+library(cowplot)
+```
+
+

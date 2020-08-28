@@ -1,0 +1,312 @@
+---
+title: "Nanostring R Notebook"
+output: pdf_document
+---
+
+```{r}
+#required packages:
+library(limma)
+library(edgeR)
+library(EnhancedVolcano)
+library(ggplot2)
+library(ggpubr)
+library(viridis)
+library(pheatmap)
+library(RColorBrewer)
+library(venn)
+library(VennDiagram)
+library(gridExtra)
+library(ggplotify)
+library(png)
+library(cowplot)
+```
+
+
+```{r}
+#THE FOLLOWING IS FOR ORTHO
+
+pre_cts <- as.matrix(read.csv("raw_ortho_preop_data.csv", header=TRUE,  row.names="Gene.Name"))
+post_cts <- as.matrix(read.csv("raw_ortho_postop_data.csv", header=TRUE,  row.names="Gene.Name"))
+cts_all <- cbind(pre_cts, post_cts) 
+
+ortho_coldata <- read.csv("patient_info.csv", header=TRUE) #reading in clinical data
+pheno = ortho_coldata[which(ortho_coldata$ID %in% colnames(cts_all)),] # matching phenotypic data to count data
+#cbind(as.data.frame(colnames(cts_all)), pheno$ID) ensures IDs match 
+
+time <- factor(rep(ortho_coldata$time), levels = c("pre", "post"))
+Subject <- as.factor(pheno$subject)
+
+design = model.matrix(~0 + time)
+corfit <- duplicateCorrelation (cts_all, design, block=Subject) #bc repeated measures
+colnames(design) <- sub(":", "_", colnames(design))
+ortho_norm_cts <- voom(cts_all, design, plot=F, normalize="none")
+
+fit=lmFit(ortho_norm_cts, design, block=Subject, correlation=corfit$consensus)
+contrast <- makeContrasts(surgeryEffect = timepost-timepre, levels=design)
+fit2 <- contrasts.fit(fit,contrast) 
+fit3 <- eBayes(fit2) 
+summary(decideTests(fit3))
+ortho_output <- topTable(fit3,coef="surgeryEffect", adjust="BH", n=Inf, sort.by="logFC") # Benjamini-Hochberg adjusted for FDR
+ortho_DEGs_1 <- subset(ortho_output, adj.P.Val < 0.05 & abs(logFC) > 1)
+ortho_DEGs_1
+
+ortho_DEGs_1.5 <- subset(ortho_output, adj.P.Val < 0.05 & abs(logFC) > 1.5)
+ortho_DEGs_1.5 
+```
+
+
+```{r}
+# THE FOLLOWING IS FOR SPINAL
+
+spinal_pre_cts <- as.matrix(read.csv("spinal_preop_data.csv", header=TRUE,  row.names="Gene.Name"))
+spinal_post_cts <- as.matrix(read.csv("spinal_postop_data.csv", header=TRUE,  row.names="Gene.Name"))
+spinal_cts_all <- cbind(spinal_pre_cts, spinal_post_cts)
+
+spinal_coldata <- read.csv("spinal_pt_info.csv", header=TRUE) #reading in clinical data
+spinal_pheno = spinal_coldata[which(spinal_coldata$ID %in% colnames(spinal_cts_all)),]
+
+spinal_time = factor(rep(spinal_coldata$time), levels = c("pre", "post"))
+spinal_Subject <- as.factor(spinal_pheno$subject)
+
+spinal_design = model.matrix(~0 + spinal_time)
+spinal_corfit <- duplicateCorrelation (spinal_cts_all, spinal_design, block= spinal_Subject) #bc repeated measures
+colnames(spinal_design) <- sub(":", "_", colnames(spinal_design))
+spinal_norm_cts <- voom(spinal_cts_all, spinal_design, plot=F, normalize="none")
+
+spinal_fit=lmFit(spinal_norm_cts, spinal_design, block=spinal_Subject, correlation=spinal_corfit$consensus)
+spinal_contrast <- makeContrasts(surgeryEffect = spinal_timepost-spinal_timepre, levels=spinal_design)
+spinal_fit2 <- contrasts.fit(spinal_fit,spinal_contrast) 
+spinal_fit3 <- eBayes(spinal_fit2) 
+summary(decideTests(spinal_fit3))
+
+spinal_output1 <- topTable(spinal_fit3,coef="surgeryEffect", adjust="BH", n=Inf, sort.by="logFC")  # BH adjusted for FDR
+spinal_DEGs_1 <- subset(spinal_output1, adj.P.Val < 0.05 & abs(logFC) > 1)
+spinal_DEGs_1
+
+spinal_DEGs_1.5 <- subset(spinal_output1, adj.P.Val < 0.05 & abs(logFC) > 1.5)
+spinal_DEGs_1.5
+```
+
+
+```{r}
+# VOLCANO PLOTs (for combined group)
+nanostring_volplot <- function(output, labeledGenes, title, N, ylim){
+       EnhancedVolcano(output, lab = rownames(output), x = 'logFC', y = 'adj.P.Val',
+                selectLab = rownames(labeledGenes), boxedlabels = TRUE, drawConnectors = TRUE,
+                xlab = bquote(~Log[2]~ 'fold change'), ylab = bquote(~-Log[10]~adjusted~italic(P)),
+                title = title, titleLabSize = 24, 
+                subtitle = "", caption = paste0("784 variables; N = ", N), captionLabSize = 18,
+                xlim = c(-3, 3), ylim = ylim, 
+                FCcutoff = 1, pCutoff = 0.05,
+                vline = c(-1.5,1.5), vlineType = "dotted", vlineCol = "red",
+                transcriptPointSize = 2, 
+                legend=c('NS','Log2 FC','Adj. P','Adj. P & Log2 FC'), legendPosition = 'bottom',
+                legendLabSize = 16, legendIconSize = 5.0, 
+                gridlines.major = F, gridlines.minor = F) 
+}
+
+
+ORTHOVolPlot <- nanostring_volplot(ortho_output, ortho_DEGs_1.5, "   Ortho", 19, c(-1,20))
+#ggsave("ORTHOvolcanoplot.png", plot=ORTHOVolPlot)
+
+SPINALVolPlot <- nanostring_volplot(spinal_output1, spinal_DEGs_1.5, "   Spine", 16, c(-1,20))
+#ggsave("SPINALvolcanoplot.png", plot=SPINALVolPlot)
+
+ortho_spinal_volplot <- ggarrange(ORTHOVolPlot, SPINALVolPlot, labels = "AUTO", font.label = list(size=20))
+ggsave("ortho_spinal_volplot.png", ortho_spinal_volplot, width = 14, height = 10)
+```
+
+
+
+```{r}
+####### THE FOLLOWING IS FOR ORTHO AND SPINAL COMBINED  #################################################
+
+ortho_and_spinal_cts <- cbind(cts_all, spinal_cts_all)
+
+all_coldata <- rbind(ortho_coldata, spinal_coldata)
+all_pheno <- all_coldata[which(all_coldata$ID %in% colnames(ortho_and_spinal_cts)),]
+
+all_time <- factor(rep(all_coldata$time), levels = c("pre", "post"))
+all_Subject <- as.factor(all_pheno$subject)
+surgery <- as.factor(all_pheno$surgery)
+
+all_design <- model.matrix(~0 + all_time + surgery)
+colnames(all_design) <- sub(":", "_", colnames(all_design))
+all_corfit <- duplicateCorrelation(ortho_and_spinal_cts, all_design, block= all_Subject) #bc repeated measures
+
+all_norm_cts <- voom(ortho_and_spinal_cts, all_design, plot=F, normalize="none")
+all_fit=lmFit(all_norm_cts, all_design, block=all_Subject, correlation=all_corfit$consensus)
+all_contrast <- makeContrasts(surgeryEffect = all_timepost-all_timepre, levels=all_design)
+all_fit2 <- contrasts.fit(all_fit, all_contrast) 
+all_fit3 <- eBayes(all_fit2)
+summary(decideTests(all_fit3)) #tells you up vs down-reg
+all_output1 <- topTable(all_fit3,coef="surgeryEffect", adjust="BH", n=Inf, sort.by="logFC")  # BH adjusted for FDR
+all_DEGs_1 <- subset(all_output1, adj.P.Val < 0.05 & abs(logFC) > 1)
+all_DEGs_1
+
+all_DEGs_1.5 <- subset(all_output1, adj.P.Val < 0.05 & abs(logFC) > 1.5)
+all_DEGs_1.5
+```
+
+
+
+```{r}
+# VOLCANO PLOT FOR COMBINED COHORT
+combinedVolPlot <- nanostring_volplot(all_output1, all_DEGs_1.5, "", 35, c(-1,30))
+combinedVolPlot_grob <- ggplotGrob(combinedVolPlot)
+ggsave("volcanoplot.png", plot=combinedVolPlot)
+
+# HEATMAP FOR COMBINED COHORT
+all_voom_data <- data.frame(all_norm_cts$E)
+voom_data4DEGs <- subset(all_voom_data, rownames(all_voom_data) %in% rownames(all_DEGs_1))  # 29 DEGs for combined group
+
+timepoints <- all_coldata[, c("ID","surgery", "time")]
+timepoints$ID <- colnames(voom_data4DEGs)
+timepoints_ordered <- timepoints[c(1:19,39:54, 20:38, 55:70),]
+timepoints_ordered <-  timepoints_ordered[, c(2,3)]
+timepoints_ordered$time <- ifelse(timepoints_ordered$time=="pre", "Baseline", "Postop")
+timepoints_ordered$surgery <- ifelse(timepoints_ordered$surgery=="ortho", "Ortho", "Spinal")
+
+voom_data4DEGs_ordered <- voom_data4DEGs[c(1:19,39:54, 20:38, 55:70)]
+rownames(timepoints_ordered) <- colnames(voom_data4DEGs_ordered)
+colnames(timepoints_ordered) <- c("Surgery", "Time Point")
+
+anno_colors <- list(
+  `Time Point` = c("Baseline" = "#d8d8d8", "Postop" = "#3d3d3d"),
+  `Surgery` = c("Ortho" = "#ffb3de", "Spinal" = "#0198E1"))
+
+combined_heatmap <- pheatmap(voom_data4DEGs_ordered,
+         annotation_col = timepoints_ordered, annotation_colors = anno_colors,
+         color = brewer.pal(n=11, name="RdBu"), fontsize = 15,
+         cluster_cols = F, scale = "row", show_colnames = F, cutree_rows = 2, silent = F) 
+
+combined_heatmap_grob <- as.grob(combined_heatmap) 
+
+lay_mat <- rbind(c(1,1,1,NA, NA, NA, NA),
+                 c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2,2),
+                 c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2,2),
+                 c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2, 2),c(1,1,1,2, 2, 2,2),
+                 c(1,1,1,NA, NA, NA, NA))
+
+panel <- arrangeGrob(grobs = list(combinedVolPlot_grob, combined_heatmap_grob), layout_matrix = lay_mat)
+
+panel <- as_ggplot(panel) + draw_plot_label(label=c("A","B"), size = 20, y = c(1, 1), x = c(0, 0.4))
+ggsave("panel.png", panel, width = 16, height = 10)
+```
+
+
+
+
+
+```{r}
+#MAKING PLOTCOUNTS FOR 5 DEGS FROM COMBINED COHORT
+
+all_bigDEGs <- all_DEGs_1.5[order(all_DEGs_1.5$logFC),]
+cts_bigDEGs <- subset(all_voom_data, rownames(all_voom_data) %in% rownames(all_bigDEGs))
+cts_bigDEGs_pre <- cbind(cts_bigDEGs[1:19], cts_bigDEGs[39:54])
+cts_bigDEGs_post <- cbind(cts_bigDEGs[20:38], cts_bigDEGs[55:70])
+
+nanostring_countplot <- function(gene){
+  pre <- as.data.frame(t(cts_bigDEGs_pre[gene,]))
+  pre$timepoint <- "Pre"
+  post <- as.data.frame(t(cts_bigDEGs_post[gene,]))
+  post$timepoint <- "Post"
+  data <- rbind(pre, post)
+  data$subject <- rep(1:35, 2)
+  plot <- ggplot(data, aes(x=timepoint, y=data[,gene], fill= "black")) + 
+    geom_boxplot(aes(fill= timepoint), outlier.shape=16, outlier.size=2) +
+    stat_boxplot(geom = 'errorbar', width = 0.3) + scale_fill_brewer(palette="Blues") +
+    geom_dotplot(binaxis = 'y', stackdir = 'center', fill="black", color="black", dotsize = 0.8) +
+    geom_line(aes(group = subject), alpha=0.2, size=0.5) +
+    scale_x_discrete(limits=c("Pre", "Post")) + theme_classic() + theme(legend.position="none") + labs(title= gene,x="", y = "CPM")
+  plot
+}
+
+nanostring_plots <- list()
+for (i in 1:nrow(all_bigDEGs)){
+  nanostring_plots[[i]] <- nanostring_countplot(rownames(all_bigDEGs)[i])
+}
+
+nanostring_dotplotPanel <- ggarrange(plotlist=nanostring_plots, labels="AUTO", ncol=3, nrow=2) 
+#ggsave("nanostring_dotplotPanel.png", nanostring_dotplotPanel)
+```
+
+
+
+```{r}
+#######  INTERSECTION OF ORTHO AND SPINAL AND COMBINED
+venn <- as_ggplot(draw.triple.venn(area1 = 38, area2 = 27, area3 = 29, n12 = 21, n23 = 23, n13 = 27, n123 = 21,
+                                   category = c("Ortho", "Spinal", "Combined"), fill = c("#ffb3de", "#0198E1", "#ffff00")))
+
+### want to make barplots for all logFC values for all sig genes 
+venn_11 <- setdiff(rownames(ortho_DEGs_1), rownames(all_DEGs_1))
+venn_6 <- setdiff(rownames(all_DEGs_1), rownames(spinal_DEGs_1))
+venn_21 <- intersect(rownames(ortho_DEGs_1), rownames(spinal_DEGs_1))
+venn_2 <- setdiff(rownames(all_DEGs_1), rownames(ortho_DEGs_1))
+venn_4 <- setdiff(rownames(spinal_DEGs_1), rownames(all_DEGs_1))
+
+all_sig_genes <- c(venn_11, venn_6, venn_21, venn_2, venn_4) #44 genes total
+
+nanostring_barplot <- function(data, degs, color, title){
+  rownames(data) <- gsub("Activating_Subgroup", "AS", rownames(data))
+  rownames(degs) <- gsub("Activating_Subgroup", "AS", rownames(degs))
+  all_sig_genes <- gsub("Activating_Subgroup", "AS", all_sig_genes)
+  up_degs <- subset(degs, logFC>0)
+  down_degs <- subset(degs, logFC<0)
+  barplot <- ggplot(data) + 
+                  geom_col(mapping = aes(x=factor(rownames(data), levels=rev(all_sig_genes)), y=abs(logFC)), 
+                           fill= color, color ="black", width = .7, alpha=.7) + 
+                  geom_text(aes(x=rownames(data), y=abs(logFC)+.1, vjust=0.77,
+                                label=ifelse(rownames(data) %in% rownames(up_degs)==TRUE, "*+", 
+                                             ifelse(rownames(data) %in% rownames(down_degs)==TRUE, "*-", ""))), size=5) + 
+                  geom_hline(yintercept= 1, alpha=.35) +
+                  theme_classic(base_size = 12) + coord_flip() + labs(title = title, x="", y= "abs(log2FC)") 
+  barplot
+}
+
+
+nanostring_barplot <- function(data, degs, color, title){
+  rownames(data) <- gsub("Activating_Subgroup", "AS", rownames(data))
+  rownames(degs) <- gsub("Activating_Subgroup", "AS", rownames(degs))
+  all_sig_genes <- gsub("Activating_Subgroup", "AS", all_sig_genes)
+  up_degs <- subset(degs, logFC>0)
+  down_degs <- subset(degs, logFC<0)
+  barplot <- ggplot(data) + 
+                  geom_col(mapping = aes(x=factor(rownames(data), levels=rev(all_sig_genes)), y=abs(logFC)), 
+                           fill= color, color ="black", width = .7, alpha=.7) + 
+                  geom_text(aes(x=rownames(data), y=abs(logFC)+.1, vjust=0.77,
+                                label=ifelse(rownames(data) %in% rownames(degs)==TRUE, "*","")), size=5,
+                            color = ifelse(rownames(data) %in% rownames(up_degs)==TRUE, "red","blue")) + 
+                  geom_hline(yintercept= 1, alpha=.35) +
+                  theme_classic(base_size = 12) + coord_flip() + labs(title = title, x="", y= "abs(log2FC)") 
+  barplot
+}
+
+ortho_barplot <- nanostring_barplot(ortho_output[all_sig_genes,], ortho_DEGs_1, "#ffb3de", "Ortho DEGs")
+spinal_barplot <- nanostring_barplot(spinal_output1[all_sig_genes,], spinal_DEGs_1, "#0198E1", "Spinal DEGs")
+combined_barplot <- nanostring_barplot(all_output1[all_sig_genes,], all_DEGs_1, "#ffff00", "Combined DEGs")
+
+nanostring_degsPanel <- ggarrange(venn, ggarrange(ortho_barplot, combined_barplot, spinal_barplot,  
+             ncol = 3, nrow = 1, labels = c("B", "C", "D")), labels = "A", nrow = 2, heights = c(1,2))
+ggsave("nanostring_degsPanel.png", nanostring_degsPanel, height = 12, width = 10)
+```
+
+
+
+
+```{r}
+#table to compare three sets across the 21 DEGs that were common amongst ortho, spinal, and combined 
+common_DEGs <- intersect(rownames(ortho_DEGs_1), rownames(spinal_DEGs_1)) 
+
+ortho_common <- ortho_output[common_DEGs, c("adj.P.Val", "logFC")]
+spinal_common <- spinal_output1[common_DEGs, c("adj.P.Val", "logFC")]
+all_common <- all_output1[common_DEGs, c("adj.P.Val", "logFC")]
+
+comparison <- cbind(Ortho = ortho_common, Spinal = spinal_common, Combined = all_common)
+colnames(comparison) <- gsub("adj.P.Val", "adjP", colnames(comparison))
+colnames(comparison) <- gsub("\\.", " - ", colnames(comparison))
+comparison <- format(comparison, digits=3)
+comparison <- comparison[order(comparison$`Ortho - logFC`),]
+#write.csv(comparison, "comparison table .csv")
+```
+
